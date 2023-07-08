@@ -13,11 +13,11 @@ PROVIDER = "http://0.0.0.0:7545"
 CHAIN_ID = 5777
 FL_ABI = "/Users/hienhuynhdang/Documents/UIT/kltn/Smart-Contract-Federated-Learning/contract_export/FEBlockchainLearning.json"
 # FL_ABI = "./abi/FEBlockchainLearning.json"
-DATASET_PATH = ""
+DATASET_PATH = "/Users/hienhuynhdang/Movies/dataset_sub/dataset{index}"
 STORAGE_PATH = "./storage"
 if __name__ == '__main__':
     index = sys.argv[1]
     CALLER = os.getenv(f'CALLER{index}')
     PRIVATE_KEY = os.getenv(f'PRIVATE_KEY{index}')
-    pipeline = Pipeline(PROVIDER, CHAIN_ID, CALLER, PRIVATE_KEY, FL_ABI, DATASET_PATH, STORAGE_PATH)
+    pipeline = Pipeline(PROVIDER, CHAIN_ID, CALLER, PRIVATE_KEY, FL_ABI, DATASET_PATH.format(index=index), STORAGE_PATH)
     pipeline()

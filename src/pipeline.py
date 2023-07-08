@@ -1,4 +1,6 @@
+import os
 import time
+import shutil
 
 import pydash as py_
 import yaml
@@ -8,6 +10,7 @@ from .image_transform import ImageTransform
 from .model_trainer import ModelTrainer
 from .dataset import Dataset
 from web3 import Web3
+import requests
 
 ROUND_STATUS = {
     "Ready": 0,
@@ -27,9 +30,28 @@ class Pipeline(object):
         self.caller = caller
         self.smc = SmartContractInteractor(provider, chain_id, caller, private_key)
         self.fl_contract = fl_contract
-        self.storage_path = storage_path
-        # self.__init_dataset_the_first_time(dataset_path)
-        pass
+        self.storage_path = f"{storage_path}/{self.caller}"
+        self.__init_dataset_the_first_time(dataset_path)
+        if os.path.exists(self.storage_path):
+            shutil.rmtree(self.storage_path)
+        os.makedirs(self.storage_path, exist_ok=True)
+
+    def __upload_file(self, path_):
+        url = "http://54.251.217.42:7020/v1/api/fl/upload-file"
+        files = {'file': open(path_, 'rb')}
+        response = requests.request("POST", url, files=files)
+        print(response.json())
+
+    def __download_file(self, file_name):
+        url = f"http://54.251.217.42:7020/static/{file_name}"
+        response = requests.get(url)
+        if response.status_code == 200:
+            with open(f"{self.storage_path}/{file_name}", 'wb') as file:
+                file.write(response.content)
+            print(f"Downloaded {file_name} successfully.")
+        else:
+            raise Exception("Error downloading file")
+        return f"{self.storage_path}/{file_name}"
 
     def encode_id(self, object_id: str):
         # from str to int
@@ -93,7 +115,7 @@ class Pipeline(object):
         self.val_dataset = Dataset(image_transform, self.label_to_num, Dataset.VAL, dataset_path)
         self.test_dataset = Dataset(image_transform, self.label_to_num, Dataset.TEST, dataset_path)
 
-    def __init_label(dataset_path):
+    def __init_label(self, dataset_path):
         with open(f"{dataset_path}/data.yaml", 'r') as file:
             data = yaml.safe_load(file)
         num_to_label = {i: name for i, name in enumerate(data['names'])}
@@ -193,16 +215,13 @@ class Pipeline(object):
     def __download_global_model(self, ss_id):
         global_id, param_id = self.smc.call(self.fl_contract, "getDataDoTraining", ss_id)
         print(f"Downloading global model {self.decode_id(global_id)}")
+        global_path = self.__download_file(f"{self.decode_id(global_id)}.pt")
         print(f"Downloading param id {self.decode_id(param_id)}")
-        # TODO: download model
-        global_path = ""
-        param_path = ""
+        param_path = self.__download_file(f"{self.decode_id(param_id)}.pth")
         return global_path, param_path
 
     def __train_model(self, global_path, param_path, round=1):
         print(f"Start training model round {round}")
-        print(f"End training model round {round}")
-        return ""
         # TODO: choose learning rate
         learning_rate = 0.001
         # TODO: choose num_epoch
@@ -220,11 +239,14 @@ class Pipeline(object):
             network_path=global_path,
             output_path=self.storage_path)
         new_param_path = model_trainer.train(include_test=False)
+        print(f"End training model round {round}")
         return new_param_path
 
     def __upload_params(self, params_path):
         # TODO: upload params to server
-        new_param_id = self.encode_id(str(ObjectId()))
+        self.__upload_file(params_path)
+        param_id = os.path.basename(params_path).split(".pth")[0]
+        new_param_id = self.encode_id(param_id)
         return new_param_id
 
     def __submit_update(self, ss_id, param_id):
