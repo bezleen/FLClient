@@ -110,10 +110,10 @@ class ModelTrainer(object):
         self.save_model(save_path)
         return save_path
 
-    def check_valid(self):
-        # TODO: check param valid
-        return
-
     def test(self):
+        self.test_step()
+        return True
+
+    def check_valid(self):
         # TODO: check param valid
         return

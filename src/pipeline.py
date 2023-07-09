@@ -11,6 +11,7 @@ from .model_trainer import ModelTrainer
 from .dataset import Dataset
 from web3 import Web3
 import requests
+import torch
 
 ROUND_STATUS = {
     "Ready": 0,
@@ -133,9 +134,9 @@ class Pipeline(object):
             current_round = self.__get_round(ss_id) + 1
             print(f"ROUND {current_round}")
             # 2: [SMC] getDataDoTraining() -> get global model + params
-            global_path, param_path = self.__download_global_model(ss_id)
+            self.global_path, param_path = self.__download_global_model(ss_id)
             # 3: [Local] local training
-            new_params_path = self.__train_model(global_path, param_path, round=current_round)
+            new_params_path = self.__train_model(self.global_path, param_path, round=current_round)
             # 4: [BE] Upload Param to server
             new_param_id = self.__upload_params(new_params_path)
             # 5: [SMC] submitUpdate() -> submit param_id -> waiting stage Checking
@@ -277,8 +278,7 @@ class Pipeline(object):
         for checking_id in checking_ids:
             checking_id = self.decode_id(checking_id)
             print(f"Downloading param of checking id: {checking_id}...")
-            # TODO: download the params from server
-            print(f"Downloaded")
+            path_file = self.__download_file(f"{checking_id}.pth")
             # TODO: local check
             print("Checking...")
             result_check = True
@@ -314,15 +314,22 @@ class Pipeline(object):
 
     def __fed_avg(self, ss_id, params_id):
         # TODO: Download
+        paths = []
+        for param_id in params_id:
+            param_id = self.decode_id(param_id)
+            path_ = self.__download_file(f"{param_id}.pth")
+            paths.append(path_)
         print("Aggregating global model...")
-        new_global_model_path = ""
+        new_global_model_path = self.__aggregate_model_updates(paths)
+        # new_global_model_path = ""
         bad_update_id = []
         return new_global_model_path, bad_update_id
 
     def __upload_global_model_params(self, new_global_model_path):
-        # TODO: upload params to server
-        new_global_model_param_id = self.encode_id(str(ObjectId()))
-        return new_global_model_param_id
+        self.__upload_file(new_global_model_path)
+        new_global_model_param_id = os.path.basename(new_global_model_path).split(".pth")[0]
+        new_global_model_param_id_encoded = self.encode_id(new_global_model_param_id)
+        return new_global_model_param_id_encoded
 
     def __submit_new_global_model(self, ss_id, new_global_model_param_id, bad_update_id):
         # submit update
@@ -341,9 +348,39 @@ class Pipeline(object):
 
     def __local_testing(self, ss_id, global_param_id, params_id):
         print("Start testing...")
-        # TODO: test global model
-        # TODO: test deletion method
-        test_result = [True, True, True, True]
+        learning_rate = 0.001
+        num_epoch = 3
+        batch_size = 5
+        # test global model
+        print(f"Downloading param id {self.decode_id(global_param_id)}")
+        global_param_path = self.__download_file(f"{self.decode_id(global_param_id)}.pth")
+        model_trainer = ModelTrainer(
+            self.train_dataset,
+            self.val_dataset,
+            self.test_dataset,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_epoch=num_epoch,
+            pretrained_path=global_param_path,
+            network_path=self.global_path,
+            output_path=self.storage_path)
+        result = model_trainer.test()
+        # test deletion method
+        test_result = []
+        for param_id in params_id:
+            param_path = self.__download_file(f"{self.decode_id(param_id)}.pth")
+            model_trainer = ModelTrainer(
+                self.train_dataset,
+                self.val_dataset,
+                self.test_dataset,
+                batch_size=batch_size,
+                learning_rate=learning_rate,
+                num_epoch=num_epoch,
+                pretrained_path=param_path,
+                network_path=self.global_path,
+                output_path=self.storage_path)
+            result = model_trainer.test()
+            test_result.append(result)
         return test_result
 
     def __submit_scores(self, ss_id, test_result):
@@ -355,4 +392,25 @@ class Pipeline(object):
         print("-" * 50, f"\nSubmit Scores {ss_id} Successfully\n", "-" * 50)
         return bool(int(tx_receipt['status']))
 
+    def __aggregate_model_updates(self, model_files):
+        aggregated_model = None
+
+        for file_path in model_files:
+            # Load the model from each file
+            model = torch.load(file_path)
+
+            if aggregated_model is None:
+                aggregated_model = model
+            else:
+                # Accumulate the model parameters
+                for param_name, param in model.items():
+                    aggregated_model[param_name] += param
+
+        # Take the average by dividing by the number of models
+        num_models = len(model_files)
+        for param_name in aggregated_model:
+            aggregated_model[param_name] /= num_models
+        save_path = f"{self.storage_path}/{ObjectId()}.pth"
+        torch.save(aggregated_model, save_path)
+        return save_path
     ################################################################
