@@ -32,6 +32,7 @@ class Pipeline(object):
         self.smc = SmartContractInteractor(provider, chain_id, caller, private_key)
         self.fl_contract = fl_contract
         self.storage_path = f"{storage_path}/{self.caller}"
+        self.last_balance = self.smc.get_balance(self.caller)
         self.__init_dataset_the_first_time(dataset_path)
         if os.path.exists(self.storage_path):
             shutil.rmtree(self.storage_path)
@@ -171,6 +172,10 @@ class Pipeline(object):
             test_result = self.__local_testing(ss_id, global_param_id, params_id)
             # 16: [SMC] submitScore()
             self.__submit_scores(ss_id, test_result)
+            time.sleep(7)
+            # 17: [SMC] claimReward()
+            self.__claim_performance_reward(ss_id, current_round - 1)
+            ###
             if current_round == self.__get_ss_info(ss_id)["maxRound"]:
                 self.__waiting_stage(ss_id, ROUND_STATUS["End"])
                 time.sleep(7)
@@ -178,7 +183,7 @@ class Pipeline(object):
             else:
                 self.__waiting_stage(ss_id, ROUND_STATUS["Training"])
                 time.sleep(7)
-            # 17: [SMC] claimReward()
+
         # END LOOP
         return
 
@@ -413,4 +418,18 @@ class Pipeline(object):
         save_path = f"{self.storage_path}/{ObjectId()}.pth"
         torch.save(aggregated_model, save_path)
         return save_path
+
+    def __claim_performance_reward(self, ss_id, round):
+        # submit update
+        tx_receipt = self.smc.transact(self.fl_contract, "claimPerformanceReward", ss_id, round)
+        print("Claimming Reward....")
+        time.sleep(7)
+        balance_in_wei = self.smc.get_balance(self.caller)
+        green = '\033[92m'
+        red = '\033[91m'
+        difference = balance_in_wei - self.last_balance
+        color = green if difference > 0 else red
+        print("-" * 50, f"\nBalance: \033[92m{balance_in_wei}\033[0m Wei || difference: {color}{difference}\033[0m \n", "-" * 50)
+        self.last_balance = balance_in_wei
+        return bool(int(tx_receipt['status']))
     ################################################################

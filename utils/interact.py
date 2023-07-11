@@ -44,6 +44,11 @@ class SmartContractInteractor(object):
         response = contract_func(*args).call()
         return response
 
+    def get_balance(self, address):
+        address = Web3.to_checksum_address(address)
+        balance_wei = self.w3.eth.get_balance(address)
+        return balance_wei
+
     def transact(self, contract_path, func, *args, value=0):
         # load the contract
         contract, name = self.__load_contract(contract_path)
